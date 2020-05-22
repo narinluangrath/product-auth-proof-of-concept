@@ -47,6 +47,8 @@ class SensitiveDataDirective extends SchemaDirectiveVisitor {
 			if (field._sensitiveWrapped) {
 				return
 			}
+			field._sensitiveWrapped = true
+
 			const { previousResolver = defaultFieldResolver } = field;
 			// eslint-disable-next-line max-params
 			field.resolve = async function(parent, args, context, ...rest) {
