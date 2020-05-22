@@ -1,5 +1,6 @@
 "use strict";
 
+const { defaultFieldResolver } = require("graphql");
 const { ApolloServer, makeExecutableSchema } = require("apollo-server-express");
 const { SchemaDirectiveVisitor } = require("graphql-tools");
 
@@ -27,85 +28,86 @@ const data = [
   }      
 ];
 
-// const RestrictedProductInformationDirective 
+class Product {
+	constructor(productData) {
+		Object.assign(this, productData);
+	}
 
-class RestrictedProductInformationDirective extends SchemaDirectiveVisitor {
-  visitObject(type) {
-    const { productIdField, sensitiveFlagField, sensitiveDataField } = this.args;
-    const fields = type.getFields();
-    const hasAuthLogic = !!(productIdField && sensitiveFlagField && sensitiveDataField);
-    const hasAuthFields = !!(
-      Object.keys(fields).includes(productIdField) && 
-      Object.keys(fields).includes(sensitiveFlagField) &&
-      Object.keys(fields).includes(sensitiveDataField)
-    )
+	isRestricted() {
+		return this.isSensitive
+	}
 
-    if (!hasAuthLogic) {
-      throw Error('RestrictedProductInformationDirective: missing required arguments');
-    }
+	roleName() {
+		return this.productId
+	}
+}
 
-    if (!hasAuthFields) {
-      throw Error('RestrictedProductInformationDirective: arguments not in object fields');
-    }
+class SensitiveDataDirective extends SchemaDirectiveVisitor {
+	wrapSensitiveField(field) {
+			if (field._sensitiveWrapped) {
+				return
+			}
+			const { previousResolver = defaultFieldResolver } = field;
+			// eslint-disable-next-line max-params
+			field.resolve = async function(parent, args, context, ...rest) {
+				if (parent.isRestricted()) {
+					const requiredRole = parent.roleName()
+					const userRoles = context.me.roles;
+					if (!userRoles.includes(requiredRole)) {
+						return null;
+					}
+				}
+				return previousResolver(parent, args, context, ...rest);
+			}
+	}
 
-    const originalSensitiveDataFieldResolver = fields[sensitiveDataField].resolve;
+	visitObject(type) {
+		const fields = type.getFields();
+		Object.keys(fields).forEach((fieldName) => {
+			this.wrapSensitiveField(fields[fieldName]);
+		})
+	}
 
-    // eslint-disable-next-line max-params
-    fields[sensitiveDataField].resolve = async function(parent, args, context, ...rest) {
-      const productField = parent[productIdField];
-      const isSensitive = parent[sensitiveFlagField];
-      const productRoles = context.me.productRoles;
-      const originalResult = originalSensitiveDataFieldResolver(parent, args, context, ...rest);
-      if (isSensitive) {
-        return productRoles.includes(productField) ? originalResult : null;
-      }
-      return originalResult;
-    }
+	visitFieldDefinition(field) {
+		this.wrapSensitiveField(field);
   }
 }
 
 
 const schemaText = `
-  directive @restrictedProductInformation(
-    productIdField: String!,
-    sensitiveFlagField: String!,
-    sensitiveDataField: String!,
-  ) on OBJECT
+	directive @sensitive on OBJECT | FIELD_DEFINITION
 
-  type SomeValuationQueryResult @restrictedProductInformation(
-    productIdField: "productId",
-    sensitiveFlagField: "isSensitive",
-    sensitiveDataField: "cost",
-  ) {
+  type SomeValuationQueryResult {
     productId: String!
-    cost: Float
+    cost: Float @sensitive
     isSensitive: Boolean
     date: String
   }
 
+	type AnotherQueryResult @sensitive {
+		productId: String!
+		cost: Float
+		date: String
+	}
+
   type Query {
     someValuationQuery: [SomeValuationQueryResult!]!
+		anotherQuery: [AnotherQueryResult]
   }
 `;
 
 const resolvers = {
   Query: {
-    someValuationQuery: () => data,
-  },
-  SomeValuationQueryResult: {
-    productId: (parent) => parent.productId,
-    cost: (parent) => parent.cost,
-    isSensitive: (parent) => parent.isSensitive,
-    date: (parent) => parent.date,
-  },
+    someValuationQuery: () => data.map((d) => { return new Product(d) }),
+  }
 };
 
 const schema = makeExecutableSchema({
   typeDefs: [schemaText],
   resolvers,
   schemaDirectives: {
-    restrictedProductInformation: RestrictedProductInformationDirective,
-  },
+		sensitive: SensitiveDataDirective
+	}
 });
 
 const createGraphqlServer = ({ logger, playground = true }) => {
@@ -117,7 +119,7 @@ const createGraphqlServer = ({ logger, playground = true }) => {
     introspection: true,
     context: {
       me: {
-        productRoles: ['Product 1'],
+        roles: ['Product 1'],
       }
     },    
   });
