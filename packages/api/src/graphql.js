@@ -7,21 +7,21 @@ const data = [
   // Returned regardless of auth roles
   {
     productId: 'Product 0',
-    cost: 0,
+    cost: 1.23,
     isSensitive: false,
     date: (new Date()).toString(),    
   },
   // Returned iff user has role 'Product 1'
   {
     productId: 'Product 1',
-    cost: 1,
+    cost: 3.45,
     isSensitive: true,
     date: (new Date()).toString(),    
   },
   // Returned iff user has role 'Product 2'
   {
     productId: 'Product 2',
-    cost: 2,
+    cost: 2.34,
     isSensitive: true,
     date: (new Date()).toString(),    
   }      
